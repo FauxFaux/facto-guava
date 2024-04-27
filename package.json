@@ -14,16 +14,23 @@
     "react": "^18",
     "react-dom": "^18"
   },
+  "optionalDependencies": {
+    "factoriolab": "file:../factoriolab"
+  },
   "devDependencies": {
+    "@babel/parser": "^7.24.4",
+    "@babel/types": "^7.24.0",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "@typescript-eslint/eslint-plugin": "^7.7.1",
+    "change-case": "^5.4.4",
     "eslint": "^8",
     "eslint-config-next": "14.2.3",
     "postcss": "^8",
     "prettier": "~3.2",
     "tailwindcss": "^3.4.1",
+    "tsx": "^4.7.3",
     "typescript": "~5.4"
   }
 }
