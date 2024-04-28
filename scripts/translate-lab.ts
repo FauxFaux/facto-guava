@@ -3,7 +3,13 @@
 import { copyFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { pascalSnakeCase } from 'change-case';
-import { type ModData, ModInfo } from 'factoriolab/src/app/models';
+import {
+  Item,
+  ItemJson,
+  type ModData,
+  ModInfo,
+  RecipeJson,
+} from 'factoriolab/src/app/models';
 import {
   type ExportNamedDeclaration,
   type VariableDeclaration,
@@ -11,17 +17,98 @@ import {
 import { addHook } from 'pirates';
 import * as path from 'node:path';
 import { transformSync } from '@babel/core';
+import countBy from 'lodash/countBy';
 
 async function main() {
   const avail = ridiculouslyLoadLab();
   const se = avail.find((a) => a.name === 'Krastorio 2 + SE');
+  // const se = avail.find((a) => a.name === '1.1.x');
   const data = await load(se!.id);
+  const techs = data.items.filter((i) => i.category === 'technology');
   const techReqs = Object.fromEntries(
-    data.items
-      .filter((i) => i.category === 'technology')
-      .map((t) => [t.id, t.technology?.prerequisites ?? []] as const),
+    techs.map((t) => [t.id, t.technology?.prerequisites ?? []] as const),
   );
-  console.log(techReqs);
+  const toMakeTech: Record<ItemJson['id'], RecipeJson['id'][]> = {};
+  for (const r of data.recipes) {
+    if (!r.isTechnology) continue;
+    for (const o of Object.keys(r.out)) {
+      if (!toMakeTech[o]) toMakeTech[o] = [];
+      toMakeTech[o].push(r.id);
+    }
+  }
+
+  const sciencePacks = countBy(
+    data.recipes
+      .filter((r) => r.isTechnology)
+      .flatMap((r) => Object.keys(r.in)),
+  );
+
+  type TechnologyItemId = string;
+
+  const packUnlockedBy: Record<ItemJson['id'], TechnologyItemId | undefined> =
+    {};
+  for (const pack of Object.keys(sciencePacks)) {
+    for (const recp of data.recipes) {
+      if (!recp.out[pack]) continue;
+      packUnlockedBy[pack] = recp.unlockedBy;
+    }
+  }
+
+  const unlocksPacks: Record<TechnologyItemId, ItemJson['id'][]> = {};
+  for (const [pack, tech] of Object.entries(packUnlockedBy)) {
+    if (!tech) continue;
+    if (!unlocksPacks[tech]) unlocksPacks[tech] = [];
+    unlocksPacks[tech].push(pack);
+  }
+
+  const packReqs: [ItemJson['id'], ItemJson['id'][]][] = [];
+  for (const [pack, unlockedBy] of Object.entries(packUnlockedBy)) {
+    if (!unlockedBy) continue;
+    const to = new Set<string>();
+    addImplies(to, unlockedBy, techReqs);
+    const impliesPacks = new Set<string>();
+    for (const also of [...to]) {
+      for (const implied of unlocksPacks[also] ?? []) {
+        impliesPacks.add(implied);
+      }
+    }
+    impliesPacks.delete(pack);
+    packReqs.push([pack, [...impliesPacks]]);
+  }
+
+  packReqs.sort(([, a], [, b]) => a.length - b.length);
+  console.log(packReqs.map(([pack, reqs]) => [pack, reqs]));
+
+  return;
+
+  for (const pack of Object.keys(sciencePacks)) {
+    const reachable = new Set<string>();
+    const relevant = techs
+      .filter((t) =>
+        (toMakeTech[t.id] ?? []).some(
+          (r) => data.recipes.find((c) => c.id === r)!.in[pack],
+        ),
+      )
+      .map((t) => t.id);
+    for (const tech of relevant) {
+      addImplies(reachable, tech, techReqs);
+    }
+    console.log(pack, sciencePacks[pack], reachable.size);
+  }
+
+  // data.items.filter((i) => i.category === 'science')
+}
+
+function addImplies(
+  to: Set<string>,
+  tech: string,
+  reqs: Record<string, string[]>,
+) {
+  if (to.has(tech)) return;
+  to.add(tech);
+  for (const req of reqs[tech]) {
+    addImplies(to, req, reqs);
+  }
 }
 
 async function load(id: string) {
