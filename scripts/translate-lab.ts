@@ -14,7 +14,19 @@ import {
 
 async function main() {
   const avail = ridiculouslyLoadLab();
-  console.log(avail);
+  const se = avail.find((a) => a.name === 'Krastorio 2 + SE');
+  const data = await load(se!.id);
+  const techReqs = Object.fromEntries(
+    data.items
+      .filter((i) => i.category === 'technology')
+      .map((t) => [t.id, t.technology?.prerequisites ?? []] as const),
+  );
+  console.log(techReqs);
+}
+
+async function load(id: string) {
+  const data: ModData = await import(`factoriolab/src/data/${id}/data.json`);
+  return data;
 }
 
 function ridiculouslyLoadLab() {
