@@ -3,14 +3,14 @@
 import { copyFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { pascalSnakeCase } from 'change-case';
-import { type ModData } from 'factoriolab/src/app/models';
-import { readFileSync } from 'fs';
-import * as babelParser from '@babel/parser';
+import { type ModData, ModInfo } from 'factoriolab/src/app/models';
 import {
   type ExportNamedDeclaration,
-  type ObjectExpression,
   type VariableDeclaration,
 } from '@babel/types';
+import { addHook } from 'pirates';
+import * as path from 'node:path';
+import { transformSync } from '@babel/core';
 
 async function main() {
   const avail = ridiculouslyLoadLab();
@@ -29,35 +29,42 @@ async function load(id: string) {
   return data;
 }
 
-function ridiculouslyLoadLab() {
+function ridiculouslyLoadLab(): ModInfo[] {
   const require = createRequire(import.meta.url);
-  const dataPath = require.resolve('factoriolab/src/data');
-  const src = readFileSync(dataPath, { encoding: 'utf-8' });
-  const ast = babelParser.parse(src, {
-    sourceType: 'module',
-    plugins: ['typescript'],
-  });
-  const exports = ast.program.body.filter(isExportNamedDeclaration);
-  const exportedVars = exports
-    .map((v) => v.declaration)
-    .filter((v) => isVariableDeclaration(v))
-    .map((v) => v?.declarations?.[0]);
-  // and I gave up on types again
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data: any = exportedVars.find((v) => v?.id?.name === 'data')!;
-  const mods = data.init.properties[0];
+  const labDataIndex = require.resolve('factoriolab/src/data');
+  const labPath = path.resolve(path.dirname(labDataIndex), '..');
 
-  const available: { id: string; name: string; game: string }[] = [];
+  const revert = addHook(
+    (code, filename) =>
+      transformSync(code, {
+        filename,
+        configFile: false,
+        presets: ['@babel/preset-typescript'],
+        plugins: [
+          [
+            'module-resolver',
+            {
+              alias: {
+                '^~/(.+)$': `${labPath}/app/\\1`,
+              },
+            },
+          ],
+        ],
+      })!.code!,
+    {
+      exts: ['.ts'],
+      matcher: (filename) => filename.startsWith(labPath),
+    },
+  );
 
-  for (const { properties } of mods.value.elements as ObjectExpression[]) {
-    const id = properties.find((p) => p.key.name === 'id')?.value.value;
-    const name = properties.find((p) => p.key.name === 'name')?.value.value;
-    const game = properties.find((p) => p.key.name === 'game')?.value.property
-      .name;
-    available.push({ id, name, game });
+  let dataObj: any;
+  try {
+    dataObj = require('factoriolab/src/data');
+  } finally {
+    revert();
   }
 
-  return available;
+  return dataObj.data.mods;
 }
 
 async function legacy() {
